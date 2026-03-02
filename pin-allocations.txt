@@ -1,0 +1,23 @@
+Pin allocations for PIC18F26Q71-I/SP COMMS-4-MCU talking to Pico2 DAQ-MCU
+PJ 2026-01-16
+
+                     PIC18F26Q71
+                    +-----v-----+
+MCLRn             1 | RE3   RB7 | 28          ICSPDAT
+C1IN0-(EXT_TRIG)  2 | RA0   RB6 | 27          ICSPCLK
+OPA1OUT(VREFA)    3 | RA1   RB5 | 26  Pico2_RESET(out)
+RA2(SCLK3V,in)    4 | RA2   RB4 | 25   Pico2_READY(in)
+RA3(SCLK5V,out)   5 | RA3   RB3 | 24    EVENTn(in/out)
+RA4(GPIO)         6 | RA4   RB2 | 23              RX2
+RA5(GPIO)         7 | RA5   RB1 | 22    OPA2OUT(VREFB)
+GND               8 | VSS   RB0 | 21              TX2
+RA7(GPIO)         9 | RA7   VDD | 20         VSYS(PWR)
+RA6(GPIO)        10 | RA6   VSS | 19              GND
+SDI1             11 | RC0   RC7 | 18              RX1
+SDO1             12 | RC1   RC6 | 17            TXDE1
+SCK1             13 | RC2   RC5 | 16              TX1
+I2C_SCL          14 | RC3   RC4 | 15          I2C_SDA
+                    +-----------+
+
+Notes:
+
