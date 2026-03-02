@@ -118,6 +118,48 @@ void init_pins()
     ODCONBbits.ODCB3 = 1;
     LATBbits.LATB3 = 1;
     //
+    // Use RA3(out),RA2(in) to buffer SPICLK from Pico2
+    //
+    ANSELAbits.ANSELA2 = 0;
+    TRISAbits.TRISA2 = 1; // input from Pico2
+    ANSELAbits.ANSELA3 = 0;
+    LATAbits.LATA3 = 0;
+    TRISAbits.TRISA3 = 0; // output to MCP3301
+    // Use CLC2 to reflect RA2 onto RA3.
+    // Follow the set-up description in Section 22.6 of datasheet.
+    CLCSELECT = 0b01; // To select CLC2 registers for the following settings.
+    CLCnCONbits.EN = 0; // Disable while setting up.
+    // Data select from outside world
+    CLCnSEL0 = 0; // data1 gets CLCIN0PPS as input
+    CLCnSEL1 = 0; // data2 gets CLCIN0PPS as input, also
+    CLCnSEL2 = 0; // data3 gets CLCIN0PPS as input, but gets ignored in logic select
+    CLCnSEL3 = 0; // data4 as for data3
+    // Logic select into gates
+    CLCnGLS0 = 0b0010; // data1 goes through true to gate 1
+    CLCnGLS1 = 0b1000; // data2 goes through true to gate 2
+    CLCnGLS2 = 0; // gate 3 gets logic 0
+    CLCnGLS3 = 0; // gate 4 gets logic 0
+    // Gate output polarities
+    CLCnPOLbits.G1POL = 0;
+    CLCnPOLbits.G2POL = 0;
+    CLCnPOLbits.G3POL = 0;
+    CLCnPOLbits.G4POL = 0;
+    // Logic function is AND-OR
+    CLCnCONbits.MODE = 0b000;
+    CLCnPOLbits.POL = 0;
+    // Connect CLC2 to the RA5,RA4 pins.
+    GIE = 0;
+    PPSLOCK = 0x55;
+    PPSLOCK = 0xaa;
+    PPSLOCKED = 0;
+    CLCIN0PPS = 0b000010; // RA2
+    RA3PPS = 0x02; // CLC2OUT
+    PPSLOCK = 0x55;
+    PPSLOCK = 0xaa;
+    PPSLOCKED = 1;
+    // Now that the connections are made and function selected, enable it.
+    CLCnCONbits.EN = 1;
+    //
     // Analog pins
     // External trigger signal is at RA0.
     TRISAbits.TRISA0 = 1;
@@ -210,11 +252,21 @@ void ADC_close()
     return;
 }
 
-uint8_t enable_external_trigger(uint8_t level, int8_t slope)
+void enable_VREFA(uint8_t level)
+{
+    // DAC2 buffered by OPA1
+}
+
+void enable_VREFB(uint8_t level)
+{
+    // DAC3 buffered by OPA2
+}
+
+uint8_t enable_external_trigger(uint16_t level, int8_t slope)
 {
     // The external trigger signal is connected to C1IN0-/RA0.
     // It uses comparator 1 to sense the analog signal,
-    // DAC2 as the reference, and CLC1 as the SR latch.
+    // 10-bit DAC1 as the reference, and CLC1 as the SR latch.
     //
     // Input:
     // level sets the trigger voltage
@@ -226,16 +278,17 @@ uint8_t enable_external_trigger(uint8_t level, int8_t slope)
     // 1 if the comparator is already high.
     //
     // Use DAC2 for the reference level.
-    DAC2CONbits.PSS = 0b10; // FVR Buffer 2
-    DAC2CONbits.NSS = 0; // VSS
-    DAC2CONbits.EN = 1;
-    DAC2DATL = level;
+    DAC1CONbits.PSS = 0b10; // FVR Buffer 2
+    DAC1CONbits.NSS = 0; // VSS
+    DAC1CONbits.EN = 1;
+    DAC1DATH = (uint8_t)(level >> 8);
+    DAC1DATL = (uint8_t)level;
     __delay_ms(1);
     //
     // Our external signal goes into the inverting input of the comparator
     // and we use the DAC2 output as the reference on the noninverting input.
     CM1NCH = 0b000; // C1IN0- pin
-    CM1PCH = 0b100; // DAC2_Output
+    CM1PCH = 0b011; // DAC1_Output
     if (slope) {
         // Invert comparator output-polarity to get trigger on positive slope.
         CM1CON0bits.POL = 1;
@@ -299,7 +352,7 @@ void disable_hardware_trigger()
     CLCnCONbits.EN = 0;
     CM1CON0bits.EN = 0;
     CM2CON0bits.EN = 0;
-    DAC2CONbits.EN = 0;
+    DAC1CONbits.EN = 0;
     // Reconnect LATB to the RB3 pin,
     // so we may drive EVENTn via software.
     GIE = 0;
