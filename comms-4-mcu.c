@@ -252,14 +252,46 @@ void ADC_close()
     return;
 }
 
-void enable_VREFA(uint8_t level)
+void set_VREF_AB(uint8_t levelA, uint8_t levelB)
 {
-    // DAC2 buffered by OPA1
+    // Assuming that the fixed voltage reference is on at 4v096,
+    // take a fraction of that reference voltage and feed it through the
+    // 8-bit DAC2 and then through the OPA1 to the external pin (OPA1OUT/RA1)
+    // to get VREF_A.
+    //
+    DAC2CONbits.PSS = 0b10; // FVR Buffer 2
+    DAC2CONbits.NSS = 0; // VSS
+    DAC2CONbits.EN = 1;
+    DAC2DATL = levelA;
+    //
+    OPA1CON0bits.UG = 1; // unity gain
+    OPA1CON0bits.CPON = 1; // charge-pump is on, high power mode
+    OPA1CON2bits.PCH = 0b101; // DAC2_OUT
+    OPA1CON0bits.EN = 1;
+    //
+    // Take a fraction of the same fixed voltage reference and feed it
+    // through the 8-bit DAC3 buffered by OPA2 then to the external pin 
+    // (OPA2OUT/RB1) to get VREF_B
+    //
+    DAC3CONbits.PSS = 0b10; // FVR Buffer 2
+    DAC3CONbits.NSS = 0; // VSS
+    DAC3CONbits.EN = 1;
+    DAC3DATL = levelB;
+    //
+    OPA2CON0bits.UG = 1; // unity gain
+    OPA2CON0bits.CPON = 1; // charge-pump is on, high power mode
+    OPA2CON2bits.PCH = 0b110; // DAC3_OUT
+    OPA2CON0bits.EN = 1;
+    //
+    __delay_ms(1);
 }
 
-void enable_VREFB(uint8_t level)
+void disable_VREF_AB()
 {
-    // DAC3 buffered by OPA2
+    OPA1CON0bits.EN = 0;
+    DAC2CONbits.EN = 0;
+    OPA2CON0bits.EN = 0;
+    DAC3CONbits.EN = 0;
 }
 
 uint8_t enable_external_trigger(uint16_t level, int8_t slope)
@@ -569,17 +601,17 @@ void interpret_RS485_command(char* cmdStr)
             token_ptr = strtok(&cmdStr[1], sep_tok);
             if (token_ptr) {
                 // Found some non-blank text; assume trigger level
-                // and, maybe, slope flag.
+                // and, maybe, slope flag.  Default slope flag is 1
+                // (for trigger on a positive slope).
                 int16_t level = atoi(token_ptr);
-                if (level > 255) level = 255;
+                if (level > 1023) level = 1023;
                 if (level < 0) level = 0;
                 int8_t slope = 1;
                 token_ptr = strtok(NULL, sep_tok);
                 if (token_ptr) {
                     slope = (int8_t) atoi(token_ptr);
                 }
-                disable_hardware_trigger(); // Can enable only one at a time.
-                uint8_t flag = enable_external_trigger((uint8_t)level, slope);
+                uint8_t flag = enable_external_trigger((uint16_t)level, slope);
                 if (flag) {
                     nchar = snprintf(bufB, NBUFB, "/0e error: comparator already triggered#\n");
                 } else {
@@ -642,6 +674,31 @@ void interpret_RS485_command(char* cmdStr)
             }
             uart1_putstr(bufB);
             break;
+        case 'w':
+            // Enable V_REF_A output to feed MCP3301 chips 0-3 and
+            // enable V_REF_B output to feed MCP3301 chips 4-7.
+            token_ptr = strtok(&cmdStr[1], sep_tok);
+            if (token_ptr) {
+                // Found some non-blank text; assume levelA followed by levelB.
+                // levelB is optional and, if omitted, get set the same as levelA.
+                int16_t levelA = atoi(token_ptr);
+                int16_t levelB = levelA;
+                token_ptr = strtok(NULL, sep_tok);
+                if (token_ptr) {
+                    levelB = atoi(token_ptr);
+                }
+                if (levelA > 255) levelA = 255;
+                if (levelA < 0) levelA = 0;
+                if (levelB > 255) levelB = 255;
+                if (levelB < 0) levelB = 0;
+                set_VREF_AB((uint8_t)levelA, (uint8_t)levelB);
+                nchar = snprintf(bufB, NBUFB, "/0w V_REF_A=%d V_REF_B=%d#\n", levelA, levelB);
+            } else {
+                // There was no text to indicate action.
+                nchar = snprintf(bufB, NBUFB, "/0w error: missing levelA and levelB#\n");
+            }
+            uart1_putstr(bufB);
+            break;
         case 'X':
             // Pass through a command to the Pico2 DAQ MCU.
             if (PICO2_READY_PIN) {
@@ -675,6 +732,7 @@ int main(void)
     uart2_flush_rx(); // Discard any characters already arrived from Pico2 MCU
     FVR_init();
     ADC_init();
+    set_VREF_AB(255, 255); // Full 4v096 reference, by default.
     // Wait until we are reasonably sure that the Pico2 has restarted
     // and then flush the incoming serial buffer.
     __delay_ms(100);
@@ -698,6 +756,7 @@ int main(void)
     }
     disable_hardware_trigger();
     release_event_pin();
+    disable_VREF_AB();
     ADC_close();
     FVR_close();
     uart2_flush_rx();
