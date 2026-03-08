@@ -1,0 +1,28 @@
+                        COMMS-MCU command letters
+                        -------------------------
+A                                            a report analog value on pin
+B                                            b I2C comms with AFE board (COMMS-3,4)
+C                                            c SPI comms with AFE board (COMMS-3,4)
+D debug CLC and comparator (COMMS-2)         d disable trigger
+E                                            e enable external trigger
+F flush RX2                                  f
+G                                            g
+H                                            h
+I                                            i enable internal trigger (COMMS-3)
+J                                            j
+K                                            k
+L turn LED on/off (COMMS-1,2)                l
+M                                            m
+N                                            n
+O                                            o
+P                                            p
+Q query status (EVENTn, DAQ-MCU READY)       q
+R restart DAQ-MCU                            r
+S                                            s
+T                                            t software trigger (pull EVENTn low)
+U                                            u interact with utility pins (COMMS-3,4)
+V                                            v report version string
+W                                            w enable V_REF
+X pass-through command to DAQ-MCU            x
+Y                                            y
+Z                                            z release EVENTn line
