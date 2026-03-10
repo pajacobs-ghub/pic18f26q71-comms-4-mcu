@@ -11,6 +11,7 @@
 // 2025-11-14 Utility pins are available for analog and digital functions.
 // 2026-03-02 Adapt from the PIC18F26Q71-COMMS-3 firmware and add the SPI-clock
 //            buffering from the PIC18F16Q41-COMMS-2 firmware
+// 2026-03-10 I2C communication, for interaction with AFE boards.
 //
 // CONFIG1
 #pragma config FEXTOSC = OFF
@@ -79,7 +80,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define VERSION_STR "v0.2 PIC18F26Q71 COMMS-4-MCU 2026-03-10"
+#define VERSION_STR "v0.3 PIC18F26Q71 COMMS-4-MCU 2026-03-10"
 
 // Each device on the RS485 network has a unique single-character identity.
 // The master (PC) has identity '0'. Slave nodes may be 1-9A-Za-z.
@@ -713,10 +714,14 @@ void interpret_RS485_command(char* cmdStr)
                                 nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
                                 strncat(bufB, buf_digits, NBUF_DIGITS);
                             } else {
-                                nchar = snprintf(bufB, NBUFB, "/0b r %d %d error: no bytes read#\n", addr7bit, nbytes);                                
+                                nchar = snprintf(bufB, NBUFB,
+                                                 "/0b r %d %d error: no bytes read#\n",
+                                                 addr7bit, nbytes);                                
                             }
                         } else {
-                            nchar = snprintf(bufB, NBUFB, "/0b r %d error: nbytes not specified#\n", addr7bit);
+                            nchar = snprintf(bufB, NBUFB,
+                                             "/0b r %d error: nbytes not specified#\n",
+                                             addr7bit);
                         }
                     } else {
                         nchar = snprintf(bufB, NBUFB, "/0b r error: address not specified#\n");
@@ -725,10 +730,49 @@ void interpret_RS485_command(char* cmdStr)
                     token_ptr = strtok(NULL, sep_tok);
                     if (token_ptr) {
                         uint8_t addr7bit = (uint8_t) atoi(token_ptr);
-                        // [TODO]
-                        nchar = snprintf(bufB, NBUFB, "/0b w %d error: not implemented#\n", addr7bit);
+                        token_ptr = strtok(NULL, sep_tok);
+                        if (token_ptr) {
+                            uint8_t nbytes = (uint8_t) atoi(token_ptr);
+                            if (nbytes > 0) {
+                                if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
+                                for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
+                                // Get the data bytes from the RS485 message.
+                                for (uint8_t j=0; j < nbytes; ++j) {
+                                    token_ptr = strtok(NULL, sep_tok);
+                                    if (token_ptr) {
+                                        buf_I2C[j] = (uint8_t) atoi(token_ptr);
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                // Attempt to write those bytes to the I2C slave.
+                                uint8_t nbytes_written = i2c1_write(addr7bit, nbytes, buf_I2C, 30);
+                                if (nbytes_written == nbytes) {
+                                    // Assemble RS485 response from the bytes successfully written.
+                                    nchar = snprintf(bufB, NBUFB, "/0b w %d %d", addr7bit, nbytes);
+                                    for (uint8_t j=0; j < nbytes; ++j) {
+                                        nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                        strncat(bufB, buf_digits, NBUF_DIGITS);
+                                    }
+                                    nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
+                                    strncat(bufB, buf_digits, NBUF_DIGITS);
+                                } else {
+                                    nchar = snprintf(bufB, NBUFB,
+                                                     "/0b w %d %d error: not all bytes written#\n",
+                                                     addr7bit, nbytes_written);
+                                }
+                            } else {
+                                nchar = snprintf(bufB, NBUFB,
+                                                 "/0b w %d %d error: no bytes to write#\n",
+                                                 addr7bit, nbytes);                                
+                            }
+                        } else {
+                            nchar = snprintf(bufB, NBUFB,
+                                             "/0b w %d error: nbytes not specified#\n",
+                                             addr7bit);
+                        }
                     } else {
-                        nchar = snprintf(bufB, NBUFB, "/0b error: address not specified#\n");
+                        nchar = snprintf(bufB, NBUFB, "/0b w error: address not specified#\n");
                     }
                 } else {
                     nchar = snprintf(bufB, NBUFB, "/0b error: action is not read nor write#\n");

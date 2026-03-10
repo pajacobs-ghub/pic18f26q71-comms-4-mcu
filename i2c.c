@@ -81,6 +81,8 @@ void i2c1_close(void)
 }
 
 uint8_t i2c1_read(uint8_t addr7bit, uint8_t n, uint8_t* buf, uint8_t timeout_ms)
+// Note that the value given for timeout_ms needs to allow enough time 
+// for reception of all n bytes following the transmission of the address byte.
 {
     uint8_t n_read = 0;
     I2C1STAT1bits.CLRBF = 1;
@@ -106,19 +108,36 @@ uint8_t i2c1_read(uint8_t addr7bit, uint8_t n, uint8_t* buf, uint8_t timeout_ms)
 } // end i2c1_read()
 
 uint8_t i2c1_write(uint8_t addr7bit, uint8_t n, uint8_t* buf, uint8_t timeout_ms)
+// Note that the value given for timeout_ms needs to allow enough time 
+// for transmission of all n bytes following the address byte.
 {
     uint8_t n_sent = 0;
     I2C1STAT1bits.CLRBF = 1;
     I2C1ADB1 = (uint8_t)(addr7bit << 1); // R/Wn bit is 0
     I2C1CNT = n;
     I2C1CON0bits.S = 1;
-    tmr0_init(timeout_ms);  // Allow enough time for full transmission.
+    tmr0_init(timeout_ms);
     for (uint8_t i=0; i < n; ++i) {
         while (!I2C1STAT1bits.TXBE) {
             /* wait for space to put next byte */
             if (tmr0_expired()) { goto Quit; }
         }
         I2C1TXB = buf[i];
+        //
+        // Wait for slave device to acknowledge previous transaction.
+        // On the first pass of this loop, this will be for the address byte
+        // and the value of n_sent will be zero on return of this function.
+        //
+        // 1. Wait for acknowledge time, after 8th SCL falling edge.
+        while (!I2C1CON1bits.ACKT) {
+            if (tmr0_expired()) { goto Quit; }
+        }
+        // 2. Wait until acknowledge sequence is done.
+        while (I2C1CON1bits.ACKT) {
+            if (tmr0_expired()) { goto Quit; }
+        }
+        // 3. Quit if the slave device did not acknowledge.
+        if (I2C1CON1bits.ACKSTAT) { goto Quit; }
         ++n_sent;
     }
     while (I2C1STAT0bits.MMA) {
