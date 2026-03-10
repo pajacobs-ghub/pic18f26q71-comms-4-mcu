@@ -75,10 +75,11 @@
 #include <stdlib.h>
 
 #include "uart.h"
+#include "i2c.h"
 #include <stdio.h>
 #include <string.h>
 
-#define VERSION_STR "v0.1 PIC18F26Q71 COMMS-4-MCU 2026-03-02"
+#define VERSION_STR "v0.2 PIC18F26Q71 COMMS-4-MCU 2026-03-10"
 
 // Each device on the RS485 network has a unique single-character identity.
 // The master (PC) has identity '0'. Slave nodes may be 1-9A-Za-z.
@@ -462,9 +463,14 @@ char bufA[NBUFA];
 // For outgoing RS485 comms
 #define NBUFB 268
 char bufB[NBUFB];
-// For incoming AVR responses
+// For incoming DAQ-MCU responses
 #define NBUFC 256
 char bufC[NBUFC];
+// For I2C and SPI communication with AFE boards
+#define NBUF_I2C 32
+uint8_t buf_I2C[NBUF_I2C];
+#define NBUF_DIGITS 8
+char buf_digits[NBUF_DIGITS];
 
 int find_char(char* buf, int start, int end, char c)
 // Returns the index of the character if found, -1 otherwise.
@@ -674,6 +680,69 @@ void interpret_RS485_command(char* cmdStr)
             }
             uart1_putstr(bufB);
             break;
+        case 'b':
+            // Read or write data bytes to the AFE board, via the I2C1 module.
+            // The form of the command is
+            // 'b' <action> <addr7bit> <nbytes> <byte0> <byte1> ...
+            // <action> is one of 'w' or 'r'
+            // <addr7bit> is the 7-bit address of the I2C slave device
+            // <nbytes> is the number of bytes to read or write
+            // <byte0> <byte1> ... are the bytes to write
+            token_ptr = strtok(&cmdStr[1], sep_tok);
+            if (token_ptr) {
+                // Found some non-blank text; assume is is a single character
+                // that specifies the action, as described above.
+                char action = (char) *token_ptr;
+                if (action == 'R' || action == 'r') {
+                    token_ptr = strtok(NULL, sep_tok);
+                    if (token_ptr) {
+                        uint8_t addr7bit = (uint8_t) atoi(token_ptr);
+                        token_ptr = strtok(NULL, sep_tok);
+                        if (token_ptr) {
+                            uint8_t nbytes = (uint8_t) atoi(token_ptr);
+                            if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
+                            for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
+                            nbytes = i2c1_read(addr7bit, nbytes, buf_I2C, 30);
+                            if (nbytes > 0) {
+                                // Successfully read some bytes, so assemble response.
+                                nchar = snprintf(bufB, NBUFB, "/0b r %d %d", addr7bit, nbytes);
+                                for (uint8_t j=0; j < nbytes; ++j) {
+                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                    strncat(bufB, buf_digits, NBUF_DIGITS);
+                                }
+                                nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
+                                strncat(bufB, buf_digits, NBUF_DIGITS);
+                            } else {
+                                nchar = snprintf(bufB, NBUFB, "/0b r %d %d error: no bytes read#\n", addr7bit, nbytes);                                
+                            }
+                        } else {
+                            nchar = snprintf(bufB, NBUFB, "/0b r %d error: nbytes not specified#\n", addr7bit);
+                        }
+                    } else {
+                        nchar = snprintf(bufB, NBUFB, "/0b r error: address not specified#\n");
+                    }
+                } else if (action == 'W' || action == 'w') {
+                    token_ptr = strtok(NULL, sep_tok);
+                    if (token_ptr) {
+                        uint8_t addr7bit = (uint8_t) atoi(token_ptr);
+                        // [TODO]
+                        nchar = snprintf(bufB, NBUFB, "/0b w %d error: not implemented#\n", addr7bit);
+                    } else {
+                        nchar = snprintf(bufB, NBUFB, "/0b error: address not specified#\n");
+                    }
+                } else {
+                    nchar = snprintf(bufB, NBUFB, "/0b error: action is not read nor write#\n");
+                }
+            } else {
+                nchar = snprintf(bufB, NBUFB, "/0b error: no read/write action specified#\n");
+            }
+            uart1_putstr(bufB);
+            break;
+        case 'c':
+            // Read or write data bytes to the AFE board, via SPI.
+            nchar = snprintf(bufB, NBUFB, "/0c error: SPI exchange not implemented#\n");
+            uart1_putstr(bufB);
+            break;
         case 'w':
             // Enable V_REF_A output to feed MCP3301 chips 0-3 and
             // enable V_REF_B output to feed MCP3301 chips 4-7.
@@ -733,6 +802,7 @@ int main(void)
     FVR_init();
     ADC_init();
     set_VREF_AB(255, 255); // Full 4v096 reference, by default.
+    i2c1_init();
     // Wait until we are reasonably sure that the Pico2 has restarted
     // and then flush the incoming serial buffer.
     __delay_ms(100);
@@ -756,6 +826,7 @@ int main(void)
     }
     disable_hardware_trigger();
     release_event_pin();
+    i2c1_close();
     disable_VREF_AB();
     ADC_close();
     FVR_close();
