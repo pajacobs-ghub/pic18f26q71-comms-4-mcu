@@ -82,7 +82,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define VERSION_STR "v0.4 PIC18F26Q71 COMMS-4-MCU 2026-03-11"
+#define VERSION_STR "v0.5 PIC18F26Q71 COMMS-4-MCU 2026-03-12"
 
 // Each device on the RS485 network has a unique single-character identity.
 // The master (PC) has identity '0'. Slave nodes may be 1-9A-Za-z.
@@ -470,8 +470,8 @@ char bufB[NBUFB];
 #define NBUFC 256
 char bufC[NBUFC];
 // For I2C and SPI communication with AFE boards
-#define NBUF_I2C 32
-uint8_t buf_I2C[NBUF_I2C];
+#define NBUF_AFE 32
+uint8_t buf_AFE[NBUF_AFE];
 #define NBUF_DIGITS 8
 char buf_digits[NBUF_DIGITS];
 
@@ -704,14 +704,14 @@ void interpret_RS485_command(char* cmdStr)
                         token_ptr = strtok(NULL, sep_tok);
                         if (token_ptr) {
                             uint8_t nbytes = (uint8_t) atoi(token_ptr);
-                            if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
-                            for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
-                            nbytes = i2c1_read(addr7bit, nbytes, buf_I2C, 30);
+                            if (nbytes > NBUF_AFE) nbytes = NBUF_AFE;
+                            for (uint8_t j=0; j < NBUF_AFE; ++j) { buf_AFE[j] = 0; }
+                            nbytes = i2c1_read(addr7bit, nbytes, buf_AFE, 30);
                             if (nbytes > 0) {
                                 // Successfully read some bytes, so assemble response.
                                 nchar = snprintf(bufB, NBUFB, "/0b r %d %d", addr7bit, nbytes);
                                 for (uint8_t j=0; j < nbytes; ++j) {
-                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_AFE[j]);
                                     strncat(bufB, buf_digits, NBUF_DIGITS);
                                 }
                                 nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
@@ -737,24 +737,24 @@ void interpret_RS485_command(char* cmdStr)
                         if (token_ptr) {
                             uint8_t nbytes = (uint8_t) atoi(token_ptr);
                             if (nbytes > 0) {
-                                if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
-                                for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
+                                if (nbytes > NBUF_AFE) nbytes = NBUF_AFE;
+                                for (uint8_t j=0; j < NBUF_AFE; ++j) { buf_AFE[j] = 0; }
                                 // Get the data bytes from the RS485 message.
                                 for (uint8_t j=0; j < nbytes; ++j) {
                                     token_ptr = strtok(NULL, sep_tok);
                                     if (token_ptr) {
-                                        buf_I2C[j] = (uint8_t) atoi(token_ptr);
+                                        buf_AFE[j] = (uint8_t) atoi(token_ptr);
                                     } else {
                                         break;
                                     }
                                 }
                                 // Attempt to write those bytes to the I2C slave.
-                                uint8_t nbytes_written = i2c1_write(addr7bit, nbytes, buf_I2C, 30);
+                                uint8_t nbytes_written = i2c1_write(addr7bit, nbytes, buf_AFE, 30);
                                 if (nbytes_written == nbytes) {
                                     // Assemble RS485 response from the bytes successfully written.
                                     nchar = snprintf(bufB, NBUFB, "/0b w %d %d", addr7bit, nbytes);
                                     for (uint8_t j=0; j < nbytes; ++j) {
-                                        nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                        nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_AFE[j]);
                                         strncat(bufB, buf_digits, NBUF_DIGITS);
                                     }
                                     nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
@@ -812,6 +812,7 @@ void interpret_RS485_command(char* cmdStr)
                         token_ptr = strtok(NULL, sep_tok);
                         if (token_ptr) {
                             uint8_t ckp = (uint8_t) (atoi(token_ptr) & 1);
+                            token_ptr = strtok(NULL, sep_tok);
                             if (token_ptr) {
                                 uint8_t cke = (uint8_t) (atoi(token_ptr) & 1);
                                 token_ptr = strtok(NULL, sep_tok);
@@ -845,24 +846,24 @@ void interpret_RS485_command(char* cmdStr)
                     if (token_ptr) {
                         uint8_t nbytes = (uint8_t) atoi(token_ptr);
                         if (nbytes > 0) {
-                            if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
-                            for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
+                            if (nbytes > NBUF_AFE) nbytes = NBUF_AFE;
+                            for (uint8_t j=0; j < NBUF_AFE; ++j) { buf_AFE[j] = 0; }
                             // Get the data bytes from the RS485 message.
                             for (uint8_t j=0; j < nbytes; ++j) {
                                 token_ptr = strtok(NULL, sep_tok);
                                 if (token_ptr) {
-                                    buf_I2C[j] = (uint8_t) atoi(token_ptr);
+                                    buf_AFE[j] = (uint8_t) atoi(token_ptr);
                                 } else {
                                     break;
                                 }
                             }
                             // Attempt to write those bytes to the SPI slave.
-                            uint8_t nbytes_written = spi1_exchange(nbytes, buf_I2C);
+                            uint8_t nbytes_written = spi1_exchange(nbytes, buf_AFE);
                             if (nbytes_written == nbytes) {
                                 // Assemble RS485 response from the bytes successfully written.
                                 nchar = snprintf(bufB, NBUFB, "/0c e %d", nbytes);
                                 for (uint8_t j=0; j < nbytes; ++j) {
-                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_AFE[j]);
                                     strncat(bufB, buf_digits, NBUF_DIGITS);
                                 }
                                 nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
@@ -884,6 +885,7 @@ void interpret_RS485_command(char* cmdStr)
                 } else if (action == 'C' || action == 'c') {
                     // Close the SPI module.
                     spi1_close();
+                    nchar = snprintf(bufB, NBUFB, "/0c c#\n");
                 } else {
                     nchar = snprintf(bufB, NBUFB,
                                      "/0c error: action is not init, exchange or close#\n");

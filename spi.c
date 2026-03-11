@@ -47,14 +47,18 @@ void spi1_init(uint8_t upin, uint8_t ckp, uint8_t cke, uint8_t smp)
     }
     //
     // Configure the SPI1 module as master and assign IO pins.
+    // SCK1 -> RC2
+    // SDO1 -> RC1
+    // SDI1 <- RC0
     SPI1CON0bits.EN = 0;
     SPI1CLK = 0b00010; // MFINTOSC (500 kHz)
     SPI1BAUD = 0; // 250 kHz should be slow enough for all sorts of devices
     SPI1CON0bits.MST = 1;
+    SPI1CON2bits.TXR = 1;
+    SPI1CON2bits.RXR = 1;
     SPI1CON1bits.CKP = ckp;
     SPI1CON1bits.CKE = cke;
     SPI1CON1bits.SMP = smp;
-    // SCK1 = RC2, SDO1 = RC1, SDI1 = RC0
     GIE = 0;
     PPSLOCK = 0x55;
     PPSLOCK = 0xaa;
@@ -63,24 +67,7 @@ void spi1_init(uint8_t upin, uint8_t ckp, uint8_t cke, uint8_t smp)
     RC2PPS = 0x1D; // SPI1 SCK
     RC1PPS = 0x1E; // SPI1 SDO
     SPI1SDIPPS = 0b010000; // RC0
-    switch (upin_ss) {
-        case 0:
-            SPI1SSPPS = 0b000100; // RA4
-            RA4PPS = 0x1F; // SPI1 SS
-            break;
-        case 1:
-            SPI1SSPPS = 0b000101; // RA5
-            RA5PPS = 0x1F; // SPI1 SS
-            break;
-        case 2:
-            SPI1SSPPS = 0b000110; // RA6
-            RA6PPS = 0x1F; // SPI1 SS
-            break;
-        case 3:
-            SPI1SSPPS = 0b000111; // RA7
-            RA7PPS = 0x1F; // SPI1 SS
-            break;
-    }
+    // Don't assign an output pin for SPI1SS.
     PPSLOCK = 0x55;
     PPSLOCK = 0xaa;
     PPSLOCKED = 1;
@@ -94,36 +81,14 @@ void spi1_init(uint8_t upin, uint8_t ckp, uint8_t cke, uint8_t smp)
     //
     SPI1CON0bits.EN = 1;
     spi1_is_initialized = 1;
-}
+} // end spi1_init()
 
 void spi1_close(void)
 {
     if (!spi1_is_initialized) return;
     //
     SPI1CON0bits.EN = 0;
-    // Return the slave-select pin to the GPIO pool but
-    // leave other assigned SPI port pins as they are..
-    GIE = 0;
-    PPSLOCK = 0x55;
-    PPSLOCK = 0xaa;
-    PPSLOCKED = 0;
-    switch (upin_ss) {
-        case 0:
-            RA4PPS = 0; // LATA4
-            break;
-        case 1:
-            RA5PPS = 0; // LATA5
-            break;
-        case 2:
-            RA6PPS = 0; // LATA6
-            break;
-        case 3:
-            RA7PPS = 0; // LATA7
-            break;
-    }
-    PPSLOCK = 0x55;
-    PPSLOCK = 0xaa;
-    PPSLOCKED = 1;
+    // Leave assigned SPI port pins as they are.
     // Set chip-select pin back to a safe mode. 
     switch (upin_ss) {
         case 0:
@@ -152,13 +117,13 @@ void spi1_close(void)
             break;
     }
     spi1_is_initialized = 0;
-}
+} // end spi1_close()
 
 uint8_t spi1_exchange(uint8_t n, uint8_t* buf)
 {
     uint8_t n_sent = 0;
     if (!spi1_is_initialized) return 0;
-    // [TODO] let the hardware control the SS pin
+    // Select slave device manually.
     switch (upin_ss) {
         case 0:
             LATAbits.LATA4 = 0;
@@ -174,8 +139,18 @@ uint8_t spi1_exchange(uint8_t n, uint8_t* buf)
             break;
     }
     __delay_us(10);
-    // [TODO]
+    SPI1STATUSbits.CLRBF = 1; // Clear the buffers.
+    for (uint8_t i=0; i < n; ++i) {
+        while (SPI1CON2bits.BUSY) { /* just wait */ }
+        SPI1TCNT = 1;
+        SPI1TXB = buf[i];
+        while (!SPI1INTFbits.SRMTIF) { /* wait for shift register to empty */ }
+        buf[i] = SPI1RXB;
+        ++n_sent;
+        SPI1INTFbits.SRMTIF = 0;
+    }
     __delay_us(10);
+    // Deselect slave device.
     switch (upin_ss) {
         case 0:
             LATAbits.LATA4 = 1;
@@ -191,4 +166,4 @@ uint8_t spi1_exchange(uint8_t n, uint8_t* buf)
             break;
     }
     return n_sent;
-}
+} // end spi1_exchange()
