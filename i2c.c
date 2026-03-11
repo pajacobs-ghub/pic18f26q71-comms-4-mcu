@@ -7,6 +7,7 @@
 #include <xc.h>
 #include <stdint.h>
 #include "global_defs.h"
+#include "i2c.h"
 
 //
 // We shall use TMR0 for our timeout monitor.

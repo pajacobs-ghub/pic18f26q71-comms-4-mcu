@@ -12,6 +12,7 @@
 // 2026-03-02 Adapt from the PIC18F26Q71-COMMS-3 firmware and add the SPI-clock
 //            buffering from the PIC18F16Q41-COMMS-2 firmware
 // 2026-03-10 I2C communication, for interaction with AFE boards.
+// 2026-03-11 SPI communication, for interaction with AFE boards.
 //
 // CONFIG1
 #pragma config FEXTOSC = OFF
@@ -77,10 +78,11 @@
 
 #include "uart.h"
 #include "i2c.h"
+#include "spi.h"
 #include <stdio.h>
 #include <string.h>
 
-#define VERSION_STR "v0.3 PIC18F26Q71 COMMS-4-MCU 2026-03-10"
+#define VERSION_STR "v0.4 PIC18F26Q71 COMMS-4-MCU 2026-03-11"
 
 // Each device on the RS485 network has a unique single-character identity.
 // The master (PC) has identity '0'. Slave nodes may be 1-9A-Za-z.
@@ -639,7 +641,8 @@ void interpret_RS485_command(char* cmdStr)
             break;
             break;
         case 'u':
-            // Interact with the 'utility' pins RA7, RA6, RA5 and RA4.
+            // Interact with the 'utility' pins RA7, RA6, RA5 and RA4
+            // as general-purpose I/O pins.
             //
             // The form of the command is
             // 'u' <action> <bits>
@@ -784,7 +787,111 @@ void interpret_RS485_command(char* cmdStr)
             break;
         case 'c':
             // Read or write data bytes to the AFE board, via SPI.
-            nchar = snprintf(bufB, NBUFB, "/0c error: SPI exchange not implemented#\n");
+            // The form of the command is one of:
+            // 'c' 'i' <upin> <ckp> <cke> <smp>
+            // 'c' 'e' <nbytes> <byte0> <byte1> ...
+            // 'c' 'c'
+            // where
+            // <upin> specifies which utility pin 0,1,2,3 to use for slave-select
+            // <ckp> is clock polarity (1=idle state is high level)
+            // <cke> is clock edge for data output (0=output on idle to active)
+            // <smp> is the input sampling point (0=mid of data output time)
+            // <nbytes> is the number of bytes to read or write
+            // <byte0> <byte1> ... are the bytes to write
+            token_ptr = strtok(&cmdStr[1], sep_tok);
+            if (token_ptr) {
+                // Found some non-blank text; assume is is a single character
+                // that specifies the action, as described above.
+                char action = (char) *token_ptr;
+                if (action == 'I' || action == 'i') {
+                    // Initialize the SPI module with a specific mode details
+                    // and selecting a specific slave device via a GPIO pin.
+                    token_ptr = strtok(NULL, sep_tok);
+                    if (token_ptr) {
+                        uint8_t upin = (uint8_t) (atoi(token_ptr) & 0b11);
+                        token_ptr = strtok(NULL, sep_tok);
+                        if (token_ptr) {
+                            uint8_t ckp = (uint8_t) (atoi(token_ptr) & 1);
+                            if (token_ptr) {
+                                uint8_t cke = (uint8_t) (atoi(token_ptr) & 1);
+                                token_ptr = strtok(NULL, sep_tok);
+                                if (token_ptr) {
+                                    uint8_t smp = (uint8_t) (atoi(token_ptr) & 1);
+                                    spi1_init(upin, ckp, cke, smp);
+                                    nchar = snprintf(bufB, NBUFB, "/0c i %d %d %d %d#\n",
+                                                     upin, ckp, cke, smp);
+                                } else {
+                                    nchar = snprintf(bufB, NBUFB,
+                                                     "/0c i %d %d %d error: smp not specified#\n",
+                                                     upin, ckp, cke);
+                                }
+                            } else {
+                                nchar = snprintf(bufB, NBUFB,
+                                                 "/0c i %d %d error: cke smp not specified#\n",
+                                                 upin, ckp);
+                            }
+                        } else {
+                            nchar = snprintf(bufB, NBUFB,
+                                             "/0c i %d error: ckp cke smp not specified#\n",
+                                             upin);
+                        }
+                    } else {
+                        nchar = snprintf(bufB, NBUFB,
+                                         "/0c i error: upin ckp cke smp not specified#\n");
+                    }
+                } else if (action == 'E' || action == 'e') {
+                    // Exchange a number of bytes with the selected device.
+                    token_ptr = strtok(NULL, sep_tok);
+                    if (token_ptr) {
+                        uint8_t nbytes = (uint8_t) atoi(token_ptr);
+                        if (nbytes > 0) {
+                            if (nbytes > NBUF_I2C) nbytes = NBUF_I2C;
+                            for (uint8_t j=0; j < NBUF_I2C; ++j) { buf_I2C[j] = 0; }
+                            // Get the data bytes from the RS485 message.
+                            for (uint8_t j=0; j < nbytes; ++j) {
+                                token_ptr = strtok(NULL, sep_tok);
+                                if (token_ptr) {
+                                    buf_I2C[j] = (uint8_t) atoi(token_ptr);
+                                } else {
+                                    break;
+                                }
+                            }
+                            // Attempt to write those bytes to the SPI slave.
+                            uint8_t nbytes_written = spi1_exchange(nbytes, buf_I2C);
+                            if (nbytes_written == nbytes) {
+                                // Assemble RS485 response from the bytes successfully written.
+                                nchar = snprintf(bufB, NBUFB, "/0c e %d", nbytes);
+                                for (uint8_t j=0; j < nbytes; ++j) {
+                                    nchar = snprintf(buf_digits, NBUF_DIGITS, " %d", buf_I2C[j]);
+                                    strncat(bufB, buf_digits, NBUF_DIGITS);
+                                }
+                                nchar = snprintf(buf_digits, NBUF_DIGITS, "#\n");
+                                strncat(bufB, buf_digits, NBUF_DIGITS);
+                            } else {
+                                nchar = snprintf(bufB, NBUFB,
+                                                 "/0c e %d error: not all bytes exchanged#\n",
+                                                 nbytes_written);
+                            }
+                        } else {
+                            nchar = snprintf(bufB, NBUFB,
+                                             "/0c e %d error: no bytes to exchange#\n",
+                                             nbytes);                                
+                        }
+                    } else {
+                        nchar = snprintf(bufB, NBUFB,
+                                         "/0c e error: nbytes not specified#\n");
+                    }
+                } else if (action == 'C' || action == 'c') {
+                    // Close the SPI module.
+                    spi1_close();
+                } else {
+                    nchar = snprintf(bufB, NBUFB,
+                                     "/0c error: action is not init, exchange or close#\n");
+                }
+            } else {
+                nchar = snprintf(bufB, NBUFB,
+                                 "/0c error: no init/exchange/close action specified#\n");
+            }
             uart1_putstr(bufB);
             break;
         case 'w':
