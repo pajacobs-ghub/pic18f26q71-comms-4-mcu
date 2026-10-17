@@ -13,6 +13,7 @@
 //            buffering from the PIC18F16Q41-COMMS-2 firmware
 // 2026-03-10 I2C communication, for interaction with AFE boards.
 // 2026-03-11 SPI communication, for interaction with AFE boards.
+// 2026-10-18 Weak pull-up on RA2, which is unconnected on the ADS131M04 board.
 //
 // CONFIG1
 #pragma config FEXTOSC = OFF
@@ -82,12 +83,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#define VERSION_STR "v0.5 PIC18F26Q71 COMMS-4-MCU 2026-03-12"
+#define VERSION_STR "v0.6 PIC18F26Q71 COMMS-4-MCU 2026-10-18"
 
 // Each device on the RS485 network has a unique single-character identity.
 // The master (PC) has identity '0'. Slave nodes may be 1-9A-Za-z.
 // When programming each device, select a suitable value for MYID.
-#define MYID 'F'
+#define MYID 'G'
 
 // The following definitions are for sensing.
 #define PICO2_READY_PIN (PORTBbits.RB4)
@@ -123,6 +124,11 @@ void init_pins()
     LATBbits.LATB3 = 1;
     //
     // Use RA3(out),RA2(in) to buffer SPICLK from Pico2
+    // This functions on the Pico2 + 8x MCP3301 boards.
+    // On the Pico2 + 4x ADS131M04 boards, RA2 and RA3 
+    // are left unconnected, so we should activate the 
+    // weak pull-up for RA2 so that it does not change spuriously.
+    WPUAbits.WPUA2 = 1;
     //
     ANSELAbits.ANSELA2 = 0;
     TRISAbits.TRISA2 = 1; // input from Pico2
